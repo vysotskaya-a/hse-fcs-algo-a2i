@@ -1,47 +1,87 @@
-#pragma once
+#ifndef ARRAY_GENERATOR_H
+#define ARRAY_GENERATOR_H
+
 #include <vector>
 #include <random>
 #include <algorithm>
 #include <stdexcept>
-using namespace std;
+
+enum class ArrayType {
+    RANDOM,
+    REVERSE_SORTED,
+    ALMOST_SORTED
+};
 
 class ArrayGenerator {
 public:
-    ArrayGenerator(int base_len, int rnd_max, unsigned seed = 123456)
-        : base_len(base_len), rnd_max(rnd_max), rng(seed) {
-        generate_all();
+    ArrayGenerator(int max_size = 100000, int rnd_min = 0, int rnd_max = 6000, unsigned seed = 12345)
+        : max_size_(max_size), rnd_min_(rnd_min), rnd_max_(rnd_max), seed_(seed), rng_(seed_)
+    {
+        generate_max_arrays();
     }
 
-    vector<int> get_prefix(const string& type, int n) {
-        if (n > base_len) throw runtime_error("requested n > base_len");
-        if (type == "random")  return vector<int>(random_base.begin(),  random_base.begin()  + n);
-        if (type == "reverse") return vector<int>(reverse_base.begin(), reverse_base.begin() + n);
-        if (type == "almost")  return vector<int>(almost_base.begin(),  almost_base.begin()  + n);
-        throw runtime_error("unknown type");
+    // Возвращает префикс нужного размера из заранее сгенерированного массива соответствующего типа
+    std::vector<int> get_prefix(ArrayType type, int size) const {
+        if (size <= 0 || size > max_size_) throw std::out_of_range("requested size out of range");
+        switch (type) {
+            case ArrayType::RANDOM:
+                return std::vector<int>(arr_random_.begin(), arr_random_.begin() + size);
+            case ArrayType::REVERSE_SORTED:
+                return std::vector<int>(arr_reverse_sorted_.begin(), arr_reverse_sorted_.begin() + size);
+            case ArrayType::ALMOST_SORTED:
+                return std::vector<int>(arr_almost_sorted_.begin(), arr_almost_sorted_.begin() + size);
+            default:
+                return {};
+        }
     }
+
+    int max_size() const { return max_size_; }
+    int rnd_min() const { return rnd_min_; }
+    int rnd_max() const { return rnd_max_; }
 
 private:
-    int base_len;
-    int rnd_max;
-    mt19937 rng;
-    vector<int> random_base, reverse_base, almost_base;
+    int max_size_;
+    int rnd_min_;
+    int rnd_max_;
+    unsigned seed_;
+    mutable std::mt19937 rng_;
 
-    void generate_all() {
-        uniform_int_distribution<int> dist(0, rnd_max);
-        random_base.resize(base_len);
-        for (int i = 0; i < base_len; ++i)
-            random_base[i] = dist(rng);
+    std::vector<int> arr_random_;
+    std::vector<int> arr_reverse_sorted_;
+    std::vector<int> arr_almost_sorted_;
 
-        reverse_base = random_base;
-        sort(reverse_base.begin(), reverse_base.end(), greater<int>());  // строго убывающий порядок
+    int almost_swaps() const {
+        int s1 = 100;
+        int s2 = std::max(1, max_size_ / 1000); // 0.1% of n
+        return std::min(s1, s2);
+    }
 
-        almost_base = random_base;
-        sort(almost_base.begin(), almost_base.end());  // сначала сортируем
-        int swaps = base_len / 1000;                   // небольшое число случайных обменов
-        uniform_int_distribution<int> pos(0, base_len - 1);
-        for (int i = 0; i < swaps; ++i) {
-            int a = pos(rng), b = pos(rng);
-            swap(almost_base[a], almost_base[b]);
+    void generate_max_arrays() {
+        arr_random_.resize(max_size_);
+        std::uniform_int_distribution<int> dist(rnd_min_, rnd_max_);
+        for (int i = 0; i < max_size_; ++i) arr_random_[i] = dist(rng_);
+
+        // Reverse sorted (non-increasing)
+        arr_reverse_sorted_.resize(max_size_);
+        // Construct some values and sort descending
+        std::vector<int> tmp(max_size_);
+        for (int i = 0; i < max_size_; ++i) tmp[i] = rnd_min_ + (i % (rnd_max_ - rnd_min_ + 1));
+        std::sort(tmp.begin(), tmp.end(), std::greater<int>());
+        arr_reverse_sorted_ = tmp;
+
+        // Almost sorted: sort random array and swap a few pairs
+        std::vector<int> sorted = arr_random_;
+        std::sort(sorted.begin(), sorted.end()); // non-decreasing
+        arr_almost_sorted_ = sorted;
+
+        int swaps = almost_swaps();
+        std::uniform_int_distribution<int> pos_dist(0, max_size_ - 1);
+        for (int k = 0; k < swaps; ++k) {
+            int i = pos_dist(rng_);
+            int j = pos_dist(rng_);
+            std::swap(arr_almost_sorted_[i], arr_almost_sorted_[j]);
         }
     }
 };
+
+#endif // ARRAY_GENERATOR_H

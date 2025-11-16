@@ -1,100 +1,119 @@
-#pragma once
-#include <bits/stdc++.h>
-#include "sort_algorithms.h"
-#include "ArrayGenerator.h"
-using namespace std;
+#ifndef SORT_TESTER_H
+#define SORT_TESTER_H
 
-struct Measurement {
-    string algorithm;
-    string data_type;
-    int threshold;
-    int n;
-    int run_index;
-    double time_ms;
+#include <vector>
+#include <chrono>
+#include <algorithm>
+#include <numeric>
+#include <functional>
+#include <stdexcept>
+
+struct TimeResult {
+    double mean_usec;
+    double median_usec;
+    std::vector<long long> runs_usec;
 };
 
 class SortTester {
 public:
-    SortTester(ArrayGenerator& gen,
-               vector<int> thresholds,
-               int min_n = 500,
-               int max_n = 100000,
-               int step = 100,
-               int runs = 5)
-        : gen(gen),
-          thresholds(thresholds),
-          MIN_N(min_n),
-          MAX_N(max_n),
-          STEP(step),
-          NUM_RUNS(runs) {}
-
-    vector<Measurement> run_all() {
-        vector<Measurement> results;
-        vector<string> types = {"random", "reverse", "almost"};
-        for (int n = MIN_N; n <= MAX_N; n += STEP) {
-            for (auto& t : types) {
-                vector<int> base = gen.get_prefix(t, n);
-
-                // стандартный merge sort
-                for (int run = 0; run < NUM_RUNS; ++run) {
-                    vector<int> arr = base, tmp(n);
-                    auto t0 = chrono::high_resolution_clock::now();
-                    merge_sort_std_rec(arr, tmp, 0, n - 1);
-                    auto t1 = chrono::high_resolution_clock::now();
-                    double ms = chrono::duration_cast<chrono::microseconds>(t1 - t0).count() / 1000.0;
-                    results.push_back({"merge_std", t, -1, n, run, ms});
-                }
-
-                // гибридный merge sort
-                for (int thr : thresholds) {
-                    for (int run = 0; run < NUM_RUNS; ++run) {
-                        vector<int> arr = base, tmp(n);
-                        auto t0 = chrono::high_resolution_clock::now();
-                        merge_sort_hybrid_rec(arr, tmp, 0, n - 1, thr);
-                        auto t1 = chrono::high_resolution_clock::now();
-                        double ms = chrono::duration_cast<chrono::microseconds>(t1 - t0).count() / 1000.0;
-                        results.push_back({"merge_hybrid", t, thr, n, run, ms});
-                    }
-                }
-            }
-            if (n % 5000 == 0)
-                cerr << "Progress: n=" << n << endl;
-        }
-        return results;
+    explicit SortTester(int runs = 5) : runs_(runs) {
+        if (runs_ <= 0) runs_ = 1;
     }
 
-    static void export_csv(const vector<Measurement>& data,
-                           string raw_file,
-                           string summary_file) {
-        ofstream raw(raw_file);
-        raw << "algorithm,data_type,threshold,n,run_index,time_ms\n";
-        for (auto& m : data)
-            raw << m.algorithm << "," << m.data_type << "," << m.threshold << ","
-                << m.n << "," << m.run_index << "," << m.time_ms << "\n";
-        raw.close();
-
-        // сводка
-        map<tuple<string,string,int,int>, vector<double>> groups;
-        for (auto& m : data)
-            groups[{m.algorithm,m.data_type,m.threshold,m.n}].push_back(m.time_ms);
-
-        ofstream summary(summary_file);
-        summary << "algorithm,data_type,threshold,n,mean_ms,median_ms,stddev_ms\n";
-        for (auto& [key, vals] : groups) {
-            auto [alg, dt, thr, n] = key;
-            sort(vals.begin(), vals.end());
-            double mean = accumulate(vals.begin(), vals.end(), 0.0) / vals.size();
-            double median = vals[vals.size()/2];
-            double var = 0; for (auto v : vals) var += (v-mean)*(v-mean);
-            var /= vals.size();
-            summary << alg << "," << dt << "," << thr << "," << n << ","
-                    << mean << "," << median << "," << sqrt(var) << "\n";
-        }
-        summary.close();
+    // стандартный mergesort (рекурсивный, с выделением временного в merge)
+    TimeResult time_merge_sort(const std::vector<int>& arr) const {
+        auto fn = [](std::vector<int>& v) {
+            if (!v.empty()) merge_sort_rec(v, 0, (int)v.size() - 1);
+        };
+        return measure_runs(arr, fn);
     }
+
+    // гибридный: merge + insertion. threshold: если размер сегмента <= threshold -> insertion
+    TimeResult time_merge_insertion_sort(const std::vector<int>& arr, int threshold) const {
+        if (threshold < 1) throw std::invalid_argument("threshold must be >= 1");
+        auto fn = [threshold](std::vector<int>& v) {
+            if (!v.empty()) merge_sort_hybrid_rec(v, 0, (int)v.size() - 1, threshold);
+        };
+        return measure_runs(arr, fn);
+    }
+
+    int runs() const { return runs_; }
 
 private:
-    ArrayGenerator& gen;
-    vector<int> thresholds;
-    int MIN_N, MAX_N, STEP, NUM_RUNS;
+    int runs_;
+
+    static void insertion_sort(std::vector<int>& a, int l, int r) {
+        for (int i = l + 1; i <= r; ++i) {
+            int key = a[i];
+            int j = i - 1;
+            while (j >= l && a[j] > key) {
+                a[j + 1] = a[j];
+                --j;
+            }
+            a[j + 1] = key;
+        }
+    }
+
+    static void merge_with_alloc(std::vector<int>& a, int l, int m, int r) {
+        int n1 = m - l + 1;
+        int n2 = r - m;
+        std::vector<int> left(n1);
+        std::vector<int> right(n2);
+        for (int i = 0; i < n1; ++i) left[i] = a[l + i];
+        for (int j = 0; j < n2; ++j) right[j] = a[m + 1 + j];
+
+        int i = 0, j = 0, k = l;
+        while (i < n1 && j < n2) {
+            if (left[i] <= right[j]) a[k++] = left[i++];
+            else a[k++] = right[j++];
+        }
+        while (i < n1) a[k++] = left[i++];
+        while (j < n2) a[k++] = right[j++];
+    }
+
+    static void merge_sort_rec(std::vector<int>& a, int l, int r) {
+        if (l >= r) return;
+        int m = l + (r - l) / 2;
+        merge_sort_rec(a, l, m);
+        merge_sort_rec(a, m + 1, r);
+        merge_with_alloc(a, l, m, r);
+    }
+
+    static void merge_sort_hybrid_rec(std::vector<int>& a, int l, int r, int threshold) {
+        int len = r - l + 1;
+        if (len <= 0) return;
+        if (len <= threshold) {
+            insertion_sort(a, l, r);
+            return;
+        }
+        int m = l + (r - l) / 2;
+        merge_sort_hybrid_rec(a, l, m, threshold);
+        merge_sort_hybrid_rec(a, m + 1, r, threshold);
+        merge_with_alloc(a, l, m, r);
+    }
+
+    TimeResult measure_runs(const std::vector<int>& arr, std::function<void(std::vector<int>&)> sort_fn) const {
+        std::vector<long long> runs_us;
+        runs_us.reserve(runs_);
+        for (int i = 0; i < runs_; ++i) {
+            std::vector<int> copy = arr;
+            auto t1 = std::chrono::high_resolution_clock::now();
+            sort_fn(copy);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            long long usec = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+            runs_us.push_back(usec);
+        }
+        std::vector<long long> sorted = runs_us;
+        std::sort(sorted.begin(), sorted.end());
+        double mean = std::accumulate(sorted.begin(), sorted.end(), 0.0) / sorted.size();
+        double median = (sorted.size() % 2 == 1) ? sorted[sorted.size()/2]
+                       : (sorted[sorted.size()/2 - 1] + sorted[sorted.size()/2]) / 2.0;
+        TimeResult res;
+        res.mean_usec = mean;
+        res.median_usec = median;
+        res.runs_usec = runs_us;
+        return res;
+    }
 };
+
+#endif // SORT_TESTER_H
