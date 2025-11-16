@@ -20,7 +20,6 @@ public:
         generate_max_arrays();
     }
 
-    // Возвращает префикс нужного размера из заранее сгенерированного массива соответствующего типа
     std::vector<int> get_prefix(ArrayType type, int size) const {
         if (size <= 0 || size > max_size_) throw std::out_of_range("requested size out of range");
         switch (type) {
@@ -61,17 +60,14 @@ private:
         std::uniform_int_distribution<int> dist(rnd_min_, rnd_max_);
         for (int i = 0; i < max_size_; ++i) arr_random_[i] = dist(rng_);
 
-        // Reverse sorted (non-increasing)
         arr_reverse_sorted_.resize(max_size_);
-        // Construct some values and sort descending
         std::vector<int> tmp(max_size_);
         for (int i = 0; i < max_size_; ++i) tmp[i] = rnd_min_ + (i % (rnd_max_ - rnd_min_ + 1));
         std::sort(tmp.begin(), tmp.end(), std::greater<int>());
         arr_reverse_sorted_ = tmp;
 
-        // Almost sorted: sort random array and swap a few pairs
         std::vector<int> sorted = arr_random_;
-        std::sort(sorted.begin(), sorted.end()); // non-decreasing
+        std::sort(sorted.begin(), sorted.end());
         arr_almost_sorted_ = sorted;
 
         int swaps = almost_swaps();

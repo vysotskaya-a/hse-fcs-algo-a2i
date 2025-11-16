@@ -9,7 +9,6 @@
 #include "ArrayGenerator.h"
 #include "SortTester.h"
 
-// Простой парсер аргументов (см. README в предыдущем варианте)
 struct Config {
     int min_n = 500;
     int max_n = 100000;
